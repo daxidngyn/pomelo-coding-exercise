@@ -1,113 +1,187 @@
-import Image from 'next/image'
+import { formatAmount } from "@/solution";
+
+const sampleInput =
+  '{"creditLimit":1000,"events":[{"eventType":"TXN_AUTHED","eventTime":1,"txnId":"t1","amount":123},{"eventType":"TXN_SETTLED","eventTime":2,"txnId":"t1","amount":456},{"eventType":"PAYMENT_INITIATED","eventTime":3,"txnId":"p1","amount":-456}]}';
 
 export default function Home() {
+  const { creditLimit, events }: { creditLimit: number; events: EventData[] } =
+    JSON.parse(sampleInput);
+
+  const txnMap: { [key: string]: EventData & { eventTimeFinalized: number } } =
+    {};
+  events.forEach((e) => {
+    if (e.eventType === "TXN_AUTHED" || e.eventType === "PAYMENT_INITIATED") {
+      txnMap[e.txnId] = { ...e, eventTimeFinalized: 0 };
+      return;
+    }
+    if (e.eventType === "PAYMENT_POSTED" || e.eventType === "TXN_SETTLED") {
+      txnMap[e.txnId].eventType = e.eventType;
+      txnMap[e.txnId].eventTimeFinalized = e.eventTime;
+      if (e.eventType === "TXN_SETTLED") txnMap[e.txnId].amount = e.amount;
+      return;
+    }
+
+    if (
+      e.eventType === "TXN_AUTH_CLEARED" ||
+      e.eventType === "PAYMENT_CANCELED"
+    ) {
+      delete txnMap[e.txnId];
+      return;
+    }
+  });
+
+  let availableCredit = creditLimit;
+  let payableBalance = 0;
+  const pendingTransactions: (EventData & { eventTimeFinalized: number })[] =
+    [];
+  const settledTransactions: (EventData & { eventTimeFinalized: number })[] =
+    [];
+
+  Object.keys(txnMap).map((txnId) => {
+    const txn = txnMap[txnId];
+
+    if (txn.eventType === "TXN_AUTHED") {
+      availableCredit -= txn.amount;
+      pendingTransactions.push(txn);
+    }
+    if (txn.eventType === "TXN_SETTLED") {
+      availableCredit -= txn.amount;
+      payableBalance += txn.amount;
+      settledTransactions.push(txn);
+    }
+    if (txn.eventType === "PAYMENT_INITIATED") {
+      payableBalance += txn.amount;
+      pendingTransactions.push(txn);
+    }
+    if (txn.eventType === "PAYMENT_POSTED") {
+      availableCredit -= txn.amount;
+      payableBalance += txn.amount;
+      settledTransactions.push(txn);
+    }
+  });
+
+  pendingTransactions.sort((a, b) => {
+    return b.eventTime - a.eventTime;
+  });
+
+  settledTransactions.sort((a, b) => {
+    return b.eventTime - a.eventTime;
+  });
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <div className="z-10 max-w-5xl w-full items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Get started by editing&nbsp;
-          <code className="font-mono font-bold">src/app/page.tsx</code>
-        </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
-          <a
-            className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0"
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{' '}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className="dark:invert"
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
+    <main className="flex min-h-screen flex-col">
+      <div className="pb-2">
+        <h1 className="text-2xl font-semibold">Pomelo Coding Exercise 2023</h1>
+        <div className="flex flex-col sm:flex-row items-baseline justify-between">
+          <h2 className="text-lg text-gray-600 font-medium">
+            Credit Card Summarizer
+          </h2>
+          <span className="text-xs font-bold text-gray-600 mt-1 sm:mt-0">
+            Created by David Nguyen
+          </span>
         </div>
+        <hr className="my-1" />
       </div>
 
-      <div className="relative flex place-items-center before:absolute before:h-[300px] before:w-[480px] before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-[240px] after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700 before:dark:opacity-10 after:dark:from-sky-900 after:dark:via-[#0141ff] after:dark:opacity-40 before:lg:h-[360px] z-[-1]">
-        <Image
-          className="relative dark:drop-shadow-[0_0_0.3rem_#ffffff70] dark:invert"
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
-        />
+      <div className="pb-6">
+        <button
+          type="button"
+          className="bg-black rounded-full text-gray-50 px-3 py-1.5"
+        >
+          <span className="text-sm">New transaction</span>
+        </button>
       </div>
 
-      <div className="mb-32 grid text-center lg:max-w-5xl lg:w-full lg:mb-0 lg:grid-cols-4 lg:text-left">
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Docs{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Find in-depth information about Next.js features and API.
-          </p>
-        </a>
+      <div className="space-y-8">
+        <section>
+          <h3 className="text-lg">Pending transactions</h3>
 
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Learn{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Learn about Next.js in an interactive course with&nbsp;quizzes!
-          </p>
-        </a>
+          <div className="mt-2 space-y-4">
+            {pendingTransactions.map((txn) => (
+              <TransactionCard key={txn.txnId} txn={txn} type="pending" />
+            ))}
+          </div>
+        </section>
 
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Templates{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Explore starter templates for Next.js.
-          </p>
-        </a>
+        <section>
+          <h3 className="text-lg">Settled transactions</h3>
 
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Deploy{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
+          <div className="mt-2 space-y-4">
+            {settledTransactions.map((txn) => (
+              <TransactionCard key={txn.txnId} txn={txn} type="settled" />
+            ))}
+          </div>
+        </section>
+
+        <section>
+          <h3 className="text-lg">History</h3>
+
+          <div className="mt-2 space-y-2">
+            {events.map((event, i) => (
+              <TransactionHistoryCard
+                key={event.eventTime}
+                event={event}
+                i={i + 1}
+              />
+            ))}
+          </div>
+        </section>
       </div>
     </main>
-  )
+  );
 }
+
+const TransactionCard = ({
+  txn,
+  type,
+}: {
+  txn: EventData & { eventTimeFinalized: number };
+  type: string;
+}) => {
+  return (
+    <article className="bg-gray-50 p-4 rounded-lg">
+      <div className="flex items-center justify-between relative">
+        <div className="font-medium text-lg md:text-xl bg-gray-50 relative z-20 pr-2">
+          {txn.txnId}
+        </div>
+        <div className="text-lg md:text-xl font-bold bg-gray-50 relative z-20 pl-2">
+          {formatAmount(txn.amount)}
+        </div>
+
+        <div className="absolute w-full border-dotted border-b-2 border-black -mb-3 z-10" />
+      </div>
+      <div className="mt-2 space-y-0.5">
+        <div className="text-xs md:text-sm">
+          Initiated at time {txn.eventTime}
+        </div>
+
+        {type === "settled" ? (
+          <div className="text-xs md:text-sm">
+            Finalized at time {txn.eventTimeFinalized}
+          </div>
+        ) : null}
+      </div>
+    </article>
+  );
+};
+
+const TransactionHistoryCard = ({
+  event,
+  i,
+}: {
+  event: EventData;
+  i: number;
+}) => {
+  return (
+    <article className="bg-gray-100 p-4 rounded-lg flex items-center">
+      <div className="bg-white rounded-full w-8 h-8 flex items-center justify-center mr-4 text-sm md:text-base">
+        <span className="text-xs">{i}</span>
+      </div>
+      <div>
+        <span className="font-bold">{event.eventType}</span> for event{" "}
+        <span className="font-bold">{event.txnId}</span> with amount{" "}
+        <span className="font-bold">{formatAmount(event.amount)}</span>
+      </div>
+    </article>
+  );
+};

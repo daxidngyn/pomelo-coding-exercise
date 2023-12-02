@@ -4,10 +4,10 @@ import { sql } from "@vercel/postgres";
 import { revalidatePath } from "next/cache";
 
 export async function createTransaction(formData: FormData) {
-  const eventType = formData.get("eventType");
-  const amount = formData.get("amount");
-  const time = formData.get("time");
-  let txnId = formData.get("txnId");
+  const eventType = formData.get("eventType") as string;
+  const amount = formData.get("amount") as string;
+  const time = formData.get("time") as string;
+  let txnId = formData.get("txnId") as string;
 
   if (
     (eventType === "PAYMENT_POSTED" ||
@@ -49,8 +49,6 @@ export async function createTransaction(formData: FormData) {
       txnId = `p${payments.length}`;
     }
   }
-
-  console.log(eventType, amount, time, txnId);
 
   await sql`
         INSERT INTO Events (TxnId, EventType, EventTime, Amount)

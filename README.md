@@ -3,7 +3,7 @@
 Designed and Developed by [David Nguyen](https://davidngn.com)
 
 **Features**:
-- everything in the HackerRank submission, such as summary of transactions (my HackerRank submission code can be found in `src/solution.ts`
+- everything in the HackerRank submission, such as summary of transactions
 - create transactions/payments with automatic revalidating
 - dynamic form fields to assist with creating new events
 

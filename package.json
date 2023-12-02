@@ -13,7 +13,9 @@
     "geist": "^1.2.0",
     "next": "14.0.3",
     "react": "^18",
-    "react-dom": "^18"
+    "react-aria-components": "1.0.0-rc.0",
+    "react-dom": "^18",
+    "tailwindcss-react-aria-components": "1.0.0-rc.0"
   },
   "devDependencies": {
     "@types/node": "^20",

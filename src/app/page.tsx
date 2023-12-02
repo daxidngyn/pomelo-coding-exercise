@@ -1,71 +1,138 @@
+import TransactionModal from "@/components/TransactionModal";
 import { formatAmount } from "@/solution";
+import { sql } from "@vercel/postgres";
 
-const sampleInput =
-  '{"creditLimit":1000,"events":[{"eventType":"TXN_AUTHED","eventTime":1,"txnId":"t1","amount":123},{"eventType":"TXN_SETTLED","eventTime":2,"txnId":"t1","amount":456},{"eventType":"PAYMENT_INITIATED","eventTime":3,"txnId":"p1","amount":-456}]}';
+const getAllEvents = async () => {
+  const entries = await sql`
+    SELECT EventType, EventTime, TxnId, Amount
+    FROM Events
+    ORDER BY EventTime
+  `;
 
-export default function Home() {
-  const { creditLimit, events }: { creditLimit: number; events: EventData[] } =
-    JSON.parse(sampleInput);
+  return entries.rows;
+};
 
-  const txnMap: { [key: string]: EventData & { eventTimeFinalized: number } } =
-    {};
-  events.forEach((e) => {
-    if (e.eventType === "TXN_AUTHED" || e.eventType === "PAYMENT_INITIATED") {
-      txnMap[e.txnId] = { ...e, eventTimeFinalized: 0 };
-      return;
-    }
-    if (e.eventType === "PAYMENT_POSTED" || e.eventType === "TXN_SETTLED") {
-      txnMap[e.txnId].eventType = e.eventType;
-      txnMap[e.txnId].eventTimeFinalized = e.eventTime;
-      if (e.eventType === "TXN_SETTLED") txnMap[e.txnId].amount = e.amount;
-      return;
-    }
+const CREDIT_LIMIT = 1000;
 
+type NewEventData = {
+  eventtype: string;
+  eventtime: number;
+  txnid: string;
+  amount: number;
+};
+
+export default async function Home() {
+  const summarize = () => {
+    const txnMap: {
+      [key: string]: NewEventData & { eventTimeFinalized: number };
+    } = {};
+
+    events.forEach((e) => {
+      if (e.eventtype === "TXN_AUTHED" || e.eventtype === "PAYMENT_INITIATED") {
+        txnMap[e.txnid] = { ...e, eventTimeFinalized: 0 };
+        return;
+      }
+      if (e.eventtype === "PAYMENT_POSTED" || e.eventtype === "TXN_SETTLED") {
+        txnMap[e.txnid].eventtype = e.eventtype;
+        txnMap[e.txnid].eventTimeFinalized = e.eventtime;
+        if (e.eventtype === "TXN_SETTLED") txnMap[e.txnid].amount = e.amount;
+        return;
+      }
+
+      if (
+        e.eventtype === "TXN_AUTH_CLEARED" ||
+        e.eventtype === "PAYMENT_CANCELED"
+      ) {
+        delete txnMap[e.txnid];
+        return;
+      }
+    });
+
+    let availableCredit = CREDIT_LIMIT;
+    let payableBalance = 0;
+    const pendingTransactions: (NewEventData & {
+      eventTimeFinalized: number;
+    })[] = [];
+    const settledTransactions: (NewEventData & {
+      eventTimeFinalized: number;
+    })[] = [];
+
+    Object.keys(txnMap).forEach((txnid) => {
+      const txn = txnMap[txnid];
+
+      if (txn.eventtype === "TXN_AUTHED") {
+        availableCredit -= txn.amount;
+        pendingTransactions.push(txn);
+      }
+      if (txn.eventtype === "TXN_SETTLED") {
+        availableCredit -= txn.amount;
+        payableBalance += txn.amount;
+        settledTransactions.push(txn);
+      }
+      if (txn.eventtype === "PAYMENT_INITIATED") {
+        payableBalance += txn.amount;
+        pendingTransactions.push(txn);
+      }
+      if (txn.eventtype === "PAYMENT_POSTED") {
+        availableCredit -= txn.amount;
+        payableBalance += txn.amount;
+        settledTransactions.push(txn);
+      }
+    });
+
+    pendingTransactions.sort((a, b) => {
+      return b.eventtime - a.eventtime;
+    });
+
+    settledTransactions.sort((a, b) => {
+      return b.eventtime - a.eventtime;
+    });
+
+    return {
+      availableCredit,
+      payableBalance,
+      pendingTransactions,
+      settledTransactions,
+    };
+  };
+
+  const events = (await getAllEvents()) as NewEventData[];
+
+  const {
+    availableCredit,
+    payableBalance,
+    pendingTransactions,
+    settledTransactions,
+  } = summarize();
+
+  const transactionIds: string[] = [];
+  const paymentIds: string[] = [];
+  const blacklistedIds: string[] = [];
+
+  events.forEach((e: NewEventData) => {
+    const { txnid, eventtype } = e;
     if (
-      e.eventType === "TXN_AUTH_CLEARED" ||
-      e.eventType === "PAYMENT_CANCELED"
-    ) {
-      delete txnMap[e.txnId];
+      transactionIds.includes(txnid) ||
+      paymentIds.includes(txnid) ||
+      blacklistedIds.includes(txnid)
+    )
       return;
-    }
-  });
 
-  let availableCredit = creditLimit;
-  let payableBalance = 0;
-  const pendingTransactions: (EventData & { eventTimeFinalized: number })[] =
-    [];
-  const settledTransactions: (EventData & { eventTimeFinalized: number })[] =
-    [];
+    if (eventtype === "TXN_AUTH_CLEARED" || eventtype === "PAYMENT_CANCELED") {
+      blacklistedIds.push(txnid);
 
-  Object.keys(txnMap).map((txnId) => {
-    const txn = txnMap[txnId];
+      if (transactionIds.includes(txnid)) {
+        const i = transactionIds.indexOf(txnid);
+        transactionIds.splice(i, 1);
+      }
+      if (paymentIds.includes(txnid)) {
+        const i = paymentIds.indexOf(txnid);
+        paymentIds.splice(i, 1);
+      }
+    }
 
-    if (txn.eventType === "TXN_AUTHED") {
-      availableCredit -= txn.amount;
-      pendingTransactions.push(txn);
-    }
-    if (txn.eventType === "TXN_SETTLED") {
-      availableCredit -= txn.amount;
-      payableBalance += txn.amount;
-      settledTransactions.push(txn);
-    }
-    if (txn.eventType === "PAYMENT_INITIATED") {
-      payableBalance += txn.amount;
-      pendingTransactions.push(txn);
-    }
-    if (txn.eventType === "PAYMENT_POSTED") {
-      availableCredit -= txn.amount;
-      payableBalance += txn.amount;
-      settledTransactions.push(txn);
-    }
-  });
-
-  pendingTransactions.sort((a, b) => {
-    return b.eventTime - a.eventTime;
-  });
-
-  settledTransactions.sort((a, b) => {
-    return b.eventTime - a.eventTime;
+    if (txnid.startsWith("t")) transactionIds.push(txnid);
+    if (txnid.startsWith("p")) paymentIds.push(txnid);
   });
 
   return (
@@ -83,46 +150,53 @@ export default function Home() {
         <hr className="my-1" />
       </div>
 
-      <div className="pb-6">
-        <button
-          type="button"
-          className="bg-black rounded-full text-gray-50 px-3 py-1.5"
-        >
-          <span className="text-sm">New transaction</span>
-        </button>
+      <div className="pb-6 flex flex-col sm:flex-row sm:items-center justify-between">
+        <div className="order-2 mt-2 sm:mt-0 sm:order-1">
+          <p className="">
+            Available credit:{" "}
+            <span className=" font-bold">{formatAmount(availableCredit)}</span>
+          </p>
+          <p className="">
+            Payable balance:{" "}
+            <span className=" font-bold">{formatAmount(payableBalance)}</span>
+          </p>
+        </div>
+
+        <div className="order-1 sm:order-2">
+          <TransactionModal
+            transactionIds={transactionIds}
+            paymentIds={paymentIds}
+          />
+        </div>
       </div>
 
       <div className="space-y-8">
         <section>
-          <h3 className="text-lg">Pending transactions</h3>
+          <h3 className="text-lg font-medium">Pending transactions</h3>
 
           <div className="mt-2 space-y-4">
             {pendingTransactions.map((txn) => (
-              <TransactionCard key={txn.txnId} txn={txn} type="pending" />
+              <TransactionCard key={txn.txnid} txn={txn} type="pending" />
             ))}
           </div>
         </section>
 
         <section>
-          <h3 className="text-lg">Settled transactions</h3>
+          <h3 className="text-lg font-medium">Settled transactions</h3>
 
           <div className="mt-2 space-y-4">
             {settledTransactions.map((txn) => (
-              <TransactionCard key={txn.txnId} txn={txn} type="settled" />
+              <TransactionCard key={txn.txnid} txn={txn} type="settled" />
             ))}
           </div>
         </section>
 
         <section>
-          <h3 className="text-lg">History</h3>
+          <h3 className="text-lg font-medium">Events</h3>
 
           <div className="mt-2 space-y-2">
             {events.map((event, i) => (
-              <TransactionHistoryCard
-                key={event.eventTime}
-                event={event}
-                i={i + 1}
-              />
+              <EventCard key={event.eventtime} event={event} i={i + 1} />
             ))}
           </div>
         </section>
@@ -135,14 +209,14 @@ const TransactionCard = ({
   txn,
   type,
 }: {
-  txn: EventData & { eventTimeFinalized: number };
+  txn: NewEventData & { eventTimeFinalized: number };
   type: string;
 }) => {
   return (
     <article className="bg-gray-50 p-4 rounded-lg">
       <div className="flex items-center justify-between relative">
         <div className="font-medium text-lg md:text-xl bg-gray-50 relative z-20 pr-2">
-          {txn.txnId}
+          {txn.txnid}
         </div>
         <div className="text-lg md:text-xl font-bold bg-gray-50 relative z-20 pl-2">
           {formatAmount(txn.amount)}
@@ -152,7 +226,7 @@ const TransactionCard = ({
       </div>
       <div className="mt-2 space-y-0.5">
         <div className="text-xs md:text-sm">
-          Initiated at time {txn.eventTime}
+          Initiated at time {txn.eventtime}
         </div>
 
         {type === "settled" ? (
@@ -165,23 +239,24 @@ const TransactionCard = ({
   );
 };
 
-const TransactionHistoryCard = ({
-  event,
-  i,
-}: {
-  event: EventData;
-  i: number;
-}) => {
+const EventCard = ({ event, i }: { event: NewEventData; i: number }) => {
   return (
     <article className="bg-gray-100 p-4 rounded-lg flex items-center">
       <div className="bg-white rounded-full w-8 h-8 flex items-center justify-center mr-4 text-sm md:text-base">
         <span className="text-xs">{i}</span>
       </div>
-      <div>
-        <span className="font-bold">{event.eventType}</span> for event{" "}
-        <span className="font-bold">{event.txnId}</span> with amount{" "}
-        <span className="font-bold">{formatAmount(event.amount)}</span>
-      </div>
+      <p>
+        <span className="font-bold">{event.eventtype}</span> for event{" "}
+        <span className="font-bold">{event.txnid}</span>{" "}
+        {event.eventtype !== "TXN_AUTH_CLEARED" &&
+          event.eventtype !== "PAYMENT_CANCELED" &&
+          event.eventtype !== "PAYMENT_POSTED" && (
+            <span>
+              with amount{" "}
+              <span className="font-bold">{formatAmount(event.amount)}</span>
+            </span>
+          )}
+      </p>
     </article>
   );
 };
